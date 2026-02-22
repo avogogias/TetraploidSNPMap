@@ -47,7 +47,14 @@ async def create_project(
     await db.flush()
     await db.refresh(project)
     logger.info("Created project id=%d name=%s mode=%s", project.id, project.name, project.mode)
-    return ProjectResponse.model_validate(project)
+    return ProjectResponse(
+        id=project.id,
+        name=project.name,
+        mode=project.mode,
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+        datasets=[],
+    )
 
 
 # ---------------------------------------------------------------------------

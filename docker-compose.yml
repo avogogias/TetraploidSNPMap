@@ -1,0 +1,96 @@
+version: "3.9"
+
+services:
+  # PostgreSQL database
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: tetraploid_snpmap
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis message broker and result backend
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # API Gateway - REST API and request orchestration
+  api-gateway:
+    build: ./services/api-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/tetraploid_snpmap
+      REDIS_URL: redis://redis:6379/0
+      COMPUTATION_SERVICE_URL: http://computation:8001
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173"]'
+      PROJECT_STORAGE_PATH: /data/projects
+    volumes:
+      - project_data:/data/projects
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Computation Service - Fortran/R wrapper
+  computation:
+    build: ./services/computation
+    ports:
+      - "8001:8001"
+    environment:
+      TPM_SCRATCH_DIR: /tmp/tpmap
+      TPM_BINARIES_DIR: /opt/tpmap/binaries
+      TPM_R_SCRIPTS_DIR: /opt/tpmap/r-scripts
+      TPM_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - project_data:/data/projects
+      - result_data:/data/results
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Celery Worker - Background job processing
+  worker:
+    build: ./services/worker
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      PROJECT_STORAGE_PATH: /data/projects
+      RESULTS_STORAGE_PATH: /data/results
+      BINARIES_DIR: /opt/tpmap/binaries
+      R_SCRIPTS_DIR: /opt/tpmap/r-scripts
+      SCRATCH_DIR: /tmp/tpmap
+    volumes:
+      - project_data:/data/projects
+      - result_data:/data/results
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Frontend - React web application
+  frontend:
+    build: ./services/frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - api-gateway
+
+volumes:
+  pgdata:
+  project_data:
+  result_data:
